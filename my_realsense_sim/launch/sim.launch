@@ -1,0 +1,25 @@
+<launch>
+
+  <group>
+
+    <!-- Remap FIRST -->
+    <remap from="/D435i/color/image_raw" to="/camera/color/image_raw"/>
+    <remap from="/D435i/depth/image_raw" to="/camera/depth/image_rect_raw"/>
+    <remap from="/D435i/imu" to="/camera/imu"/>
+
+    <!-- Gazebo world -->
+    <include file="$(find gazebo_ros)/launch/empty_world.launch"/>
+
+    <!-- Robot description -->
+    <param name="robot_description"
+       command="$(find xacro)/xacro '$(find my_realsense_sim)/urdf/camera.xacro'"/>
+
+    <!-- Spawn -->
+    <node name="spawn_camera"
+      pkg="gazebo_ros"
+      type="spawn_model"
+      args="-param robot_description -urdf -model d435i_camera"/>
+
+  </group>
+
+</launch>

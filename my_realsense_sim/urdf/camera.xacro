@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<robot name="d435i_camera"
+       xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <link name="world"/>
+  <link name="camera_link"/>
+
+  <joint name="camera_fixed" type="fixed">
+    <parent link="world"/>
+    <child link="camera_link"/>
+    <origin xyz="0 0 1" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:include filename="$(find realsense_gazebo_description)/urdf/_d435i.urdf.xacro"/>
+
+  <xacro:sensor_d435i
+      parent="camera_link"
+      name="D435i"
+      topics_ns="D435i">
+
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </xacro:sensor_d435i>
+
+</robot>
