@@ -12,7 +12,7 @@
 
     <!-- Robot description -->
     <param name="robot_description"
-       command="$(find xacro)/xacro '$(find my_realsense_sim)/urdf/camera.xacro'"/>
+       command="$(find xacro)/xacro '$(find realsense_sim)/urdf/camera.xacro'"/>
 
     <!-- Spawn -->
     <node name="spawn_camera"
