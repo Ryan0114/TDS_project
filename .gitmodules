@@ -7,3 +7,6 @@
 [submodule "realsense_gazebo_plugin"]
 	path = realsense_gazebo_plugin
 	url = https://github.com/m-tartari/realsense_gazebo_plugin.git
+[submodule "ddynamic_reconfigure"]
+	path = ddynamic_reconfigure
+	url = https://github.com/pal-robotics/ddynamic_reconfigure.git
