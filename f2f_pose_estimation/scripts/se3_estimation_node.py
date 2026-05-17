@@ -4,119 +4,48 @@ import numpy as np
 from std_msgs.msg import Float64MultiArray
 from geometry_msgs.msg import PoseStamped, TransformStamped
 import tf.transformations as tft
+import tf2_ros
 
 pose_pub = None
 tf_pub = None
+tf_broadcaster = None
 
 
-# ================================
-# Lie algebra utilities
-# ================================
-
-def hat(w):
-    """so(3) hat operator"""
-    return np.array([
-        [0, -w[2], w[1]],
-        [w[2], 0, -w[0]],
-        [-w[1], w[0], 0]
-    ])
-
-
-def se3_exp(xi):
-    """Exponential map from se(3) to SE(3)"""
-    rho = xi[:3]
-    omega = xi[3:]
-
-    theta = np.linalg.norm(omega)
-    Omega = hat(omega)
-
-    if theta < 1e-8:
-        R = np.eye(3) + Omega
-        V = np.eye(3)
-    else:
-        A = np.sin(theta) / theta
-        B = (1 - np.cos(theta)) / (theta**2)
-        C = (theta - np.sin(theta)) / (theta**3)
-
-        R = np.eye(3) + A * Omega + B * (Omega @ Omega)
-        V = np.eye(3) + B * Omega + C * (Omega @ Omega)
-
-    t = V @ rho
-
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = t
-    return T
-
-
-# ================================
-# Gauss-Newton on SE(3) (FIXED)
-# ================================
-
-def se3_gauss_newton(XA, XB, max_iter=10, damping=1e-6):
+def umeyama_alignment(XA, XB):
     """
-    XA -> XB
-    Solve: q ≈ T p
+    XA, XB: shape (N,3)
+    Returns R (3x3), t (3,)
     """
 
-    T = np.eye(4)
+    assert XA.shape == XB.shape
+    N = XA.shape[0]
 
-    for _ in range(max_iter):
+    # --- centroids ---
+    mu_A = np.mean(XA, axis=0)
+    mu_B = np.mean(XB, axis=0)
 
-        H = np.zeros((6, 6))
-        b = np.zeros(6)
+    # --- center the points ---
+    A_centered = XA - mu_A
+    B_centered = XB - mu_B
 
-        R = T[:3, :3]
-        t = T[:3, 3]
+    # --- covariance matrix ---
+    H = A_centered.T @ B_centered / N
 
-        for p, q in zip(XA, XB):
+    # --- SVD ---
+    U, S, Vt = np.linalg.svd(H)
 
-            # transform
-            x = R @ p + t
+    R = Vt.T @ U.T
 
-            # residual
-            r = q - x
+    # --- reflection correction ---
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = Vt.T @ U.T
 
-            # ===== FIXED Jacobian =====
-            # consistent with left perturbation:
-            # x' = x + δρ + δω × x
-            # r = q - x
-            # dr = -δρ - δω × x
-            J = np.zeros((3, 6))
-            J[:, :3] = -np.eye(3)
-            J[:, 3:] = -hat(x)
+    # --- translation ---
+    t = mu_B - R @ mu_A
 
-            H += J.T @ J
-            b += J.T @ r
+    return R, t
 
-        # damping (Levenberg–Marquardt)
-        H += damping * np.eye(6)
-
-        # solve
-        try:
-            delta_xi = np.linalg.solve(H, b)
-        except np.linalg.LinAlgError:
-            rospy.logwarn("Singular system in SE(3) GN")
-            break
-
-        # step clipping (stability)
-        norm = np.linalg.norm(delta_xi)
-        if norm > 1.0:
-            delta_xi *= 1.0 / norm
-
-        # convergence
-        if norm < 1e-6:
-            break
-
-        # left update (consistent)
-        T = se3_exp(delta_xi) @ T
-
-    return T
-
-
-# ================================
-# ROS callback
-# ================================
 
 def callback(msg):
     global pose_pub, tf_pub
@@ -136,20 +65,21 @@ def callback(msg):
     XA = pts[:, 0:3]
     XB = pts[:, 3:6]
 
+    # --- estimate pose ---
     try:
-        T = se3_gauss_newton(XA, XB)
+        R, t = umeyama_alignment(XA, XB)
     except Exception as e:
-        rospy.logwarn(f"Optimization failed: {e}")
+        rospy.logwarn(f"SVD failed: {e}")
         return
 
-    R = T[:3, :3]
-    t = T[:3, 3]
+    # --- convert to quaternion ---
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = t
 
     q = tft.quaternion_from_matrix(T)
 
-    # =========================
-    # Pose output
-    # =========================
+    # --- publish PoseStamped ---
     pose_msg = PoseStamped()
     pose_msg.header.stamp = rospy.Time.now()
     pose_msg.header.frame_id = "camera_color_optical_frame"
@@ -165,9 +95,7 @@ def callback(msg):
 
     pose_pub.publish(pose_msg)
 
-    # =========================
-    # TF output
-    # =========================
+    # --- publish TransformStamped ---
     tf_msg = TransformStamped()
     tf_msg.header.stamp = pose_msg.header.stamp
     tf_msg.header.frame_id = "frame_A"
@@ -184,23 +112,20 @@ def callback(msg):
 
     tf_pub.publish(tf_msg)
 
-    rospy.loginfo(f"[SE3 GN FIXED] {len(XA)} correspondences")
+    # rospy.loginfo(f"Published pose with {len(XA)} correspondences")
 
-
-# ================================
-# main
-# ================================
 
 def main():
-    global pose_pub, tf_pub
+    global pose_pub, tf_pub, tf_broadcaster
 
     rospy.init_node('se3_estimation_node')
 
     pose_pub = rospy.Publisher('/relative_pose', PoseStamped, queue_size=10)
     tf_pub = rospy.Publisher('/relative_transform', TransformStamped, queue_size=10)
 
-    rospy.Subscriber('/feature_3d_matches', Float64MultiArray,
-                     callback, queue_size=10)
+    tf_broadcaster = tf2_ros.TransformBroadcaster()  # RVIZ
+
+    rospy.Subscriber('/feature_3d_matches', Float64MultiArray, callback, queue_size=10)
 
     rospy.spin()
 

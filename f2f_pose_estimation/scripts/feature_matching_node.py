@@ -5,14 +5,14 @@ import rospy
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float64
 from cv_bridge import CvBridge
-from vslam_pgo.msg import FeatureMatches   # <-- your package name
+from f2f_pose_estimation.msg import FeatureMatches  
 
 bridge = CvBridge()
 
 prev_img = None
 has_prev_img = False
 
-orb = cv2.ORB_create(2000)
+orb = cv2.ORB_create(2000)  # <------ number of features
 bf = cv2.BFMatcher(cv2.NORM_HAMMING)
 
 sim_pub = None
@@ -26,6 +26,8 @@ def image_callback(msg):
 
     if has_prev_img:
         matches, similarity = compute_matches(prev_img, curr_img)
+        
+        # matches = matches[:100] # <---------------
 
         # --- publish similarity ---
         sim_pub.publish(similarity)
@@ -37,7 +39,7 @@ def image_callback(msg):
 
         match_pub.publish(fm)
 
-        rospy.loginfo(f"Matches: {len(matches)}, Similarity: {similarity:.3f}")
+        # rospy.loginfo(f"Matches: {len(matches)}, Similarity: {similarity:.3f}")
 
     prev_img = curr_img
     has_prev_img = True

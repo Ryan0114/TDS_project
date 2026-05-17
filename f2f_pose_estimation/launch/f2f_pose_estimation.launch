@@ -1,0 +1,6 @@
+<launch>
+	<node pkg="f2f_pose_estimation" type="feature_matching_node.py" name="feature_matching" output="screen" />
+	<node pkg="f2f_pose_estimation" type="depth_association_node.py" name="depth_association" output="screen" />
+	<node pkg="f2f_pose_estimation" type="se3_estimation_node.py" name="se3_estimation" output="screen" />
+	<node pkg="f2f_pose_estimation" type="vo_odometry_tf_node.py" name="vo_odometry_tf" output="screen" />
+</launch>

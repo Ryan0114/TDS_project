@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>vslam_pgo</name>
+  <name>f2f_pose_estimation</name>
   <version>0.0.0</version>
-  <description>The vslam_pgo package</description>
+  <description>The f2f_pose_estimation package</description>
 
   <!-- One maintainer tag required, multiple allowed, one person per tag -->
   <!-- Example:  -->

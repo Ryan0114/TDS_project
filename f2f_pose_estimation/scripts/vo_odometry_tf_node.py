@@ -60,7 +60,7 @@ class VOIntegrator:
 
         self.br.sendTransform(tf_msg)
 
-        rospy.loginfo(f"Pose: {t}")
+        # rospy.loginfo(f"Pose: {t}")
 
 
 def main():

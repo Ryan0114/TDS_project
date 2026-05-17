@@ -5,7 +5,7 @@ import message_filters
 from sensor_msgs.msg import Image
 from std_msgs.msg import Float64MultiArray
 from cv_bridge import CvBridge
-from vslam_pgo.msg import FeatureMatches
+from f2f_pose_estimation.msg import FeatureMatches
 
 bridge = CvBridge()
 
@@ -25,7 +25,7 @@ def backproject(u, v, Z):
 
 
 def callback(match_msg, depth_msg):
-    rospy.loginfo("Callback triggered")
+    # rospy.loginfo("Callback triggered")
 
     data = np.array(match_msg.data, dtype=np.float64)
 
@@ -78,7 +78,7 @@ def callback(match_msg, depth_msg):
     msg_out = Float64MultiArray(data=points_3d.flatten().tolist())
     pub.publish(msg_out)
 
-    rospy.loginfo(f"Published {len(points_3d)} 3D correspondences")
+    # rospy.loginfo(f"Published {len(points_3d)} 3D correspondences")
 
 
 def main():
@@ -98,6 +98,9 @@ def main():
     )
 
     ts.registerCallback(callback)
+
+
+
 
     rospy.spin()
 
