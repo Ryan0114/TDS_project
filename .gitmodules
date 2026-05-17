@@ -10,3 +10,9 @@
 [submodule "ddynamic_reconfigure"]
 	path = ddynamic_reconfigure
 	url = https://github.com/pal-robotics/ddynamic_reconfigure.git
+[submodule "gtsam"]
+	path = gtsam
+	url = https://github.com/borglab/gtsam.git
+[submodule "gtsam-modified"]
+	path = gtsam-modified
+	url = https://github.com/borglab/gtsam.git
