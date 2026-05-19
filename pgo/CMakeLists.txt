@@ -7,7 +7,16 @@ project(pgo)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED)
+find_package(catkin REQUIRED COMPONENTS
+  roscpp
+  geometry_msgs
+  std_msgs
+  tf2_ros
+)
+
+find_package(GTSAM REQUIRED)
+
+find_package(Eigen3 REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -113,7 +122,9 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(
 # include
-# ${catkin_INCLUDE_DIRS}
+  ${catkin_INCLUDE_DIRS}
+  ${GTSAM_INCLUDE_DIR}
+  ${EIGEN3_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -130,6 +141,7 @@ include_directories(
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
 # add_executable(${PROJECT_NAME}_node src/pgo_node.cpp)
+add_executable(pgo_node src/pgo_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -142,9 +154,12 @@ include_directories(
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
-# target_link_libraries(${PROJECT_NAME}_node
-#   ${catkin_LIBRARIES}
-# )
+target_link_libraries(pgo_node
+  ${catkin_LIBRARIES}
+  Eigen3::Eigen
+  gtsam
+  tbb
+)
 
 #############
 ## Install ##
@@ -156,7 +171,7 @@ include_directories(
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
 # catkin_install_python(PROGRAMS
-#   scripts/my_python_script
+#   scripts/your_scripts.py
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 # )
 
