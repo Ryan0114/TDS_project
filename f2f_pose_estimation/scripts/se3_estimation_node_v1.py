@@ -48,7 +48,7 @@ def umeyama_alignment(XA, XB):
 
 
 def callback(msg):
-    global pose_pub, tf_pub, tf_broadcaster
+    global pose_pub, tf_pub
 
     data = np.array(msg.data, dtype=np.float64)
 
@@ -111,18 +111,8 @@ def callback(msg):
     tf_msg.transform.rotation.w = q[3]
 
     tf_pub.publish(tf_msg)
-    
-    # --- Broadcast TF live to RViz ---
-    if tf_broadcaster is not None:
-        tf_broadcaster.sendTransform(tf_msg)
 
-    # --- Log the Relative Motion ---
-    rospy.loginfo(
-        f"Relative motion [frame_A -> frame_B] computed with {len(XA)} points:\n"
-        f"  dx: {t[0]:.4f} m\n"
-        f"  dy: {t[1]:.4f} m\n"
-        f"  dz: {t[2]:.4f} m"
-    )
+    # rospy.loginfo(f"Published pose with {len(XA)} correspondences")
 
 
 def main():
