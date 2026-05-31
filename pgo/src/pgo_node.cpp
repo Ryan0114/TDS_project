@@ -1,168 +1,198 @@
-#include "ros/ros.h"
+#include <ros/ros.h>
+
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TransformStamped.h>
-#include <std_msgs/Float64MultiArray.h>
+
 #include <tf2_ros/transform_broadcaster.h>
 
-// GTSAM Core Headers
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/geometry/Rot3.h>
 #include <gtsam/geometry/Point3.h>
+
+#include <gtsam/nonlinear/ISAM2.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
-#include <gtsam/nonlinear/ISAM2.h>
 
-// GTSAM Factor Headers
-#include <gtsam/slam/PriorFactor.h>
 #include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/slam/PriorFactor.h>
 
 class PGONode {
+
 private:
+
     ros::NodeHandle nh_;
-    ros::Subscriber odom_sub_;
-    ros::Subscriber loop_sub_;
+    ros::Subscriber sub_;
+
     tf2_ros::TransformBroadcaster br_;
 
-    // GTSAM Engine
     gtsam::ISAM2 isam_;
     gtsam::NonlinearFactorGraph graph_;
-    gtsam::Values initial_values_;
-    gtsam::Values latest_estimate_;
+    gtsam::Values initial_;
+    gtsam::Values result_;
 
-    size_t pose_count_ = 0;
+    bool initialized_ = false;
+    size_t k_ = 0;
+
     gtsam::Pose3 prev_pose_;
 
-    // Noise Models
     gtsam::noiseModel::Diagonal::shared_ptr prior_noise_;
     gtsam::noiseModel::Diagonal::shared_ptr odom_noise_;
 
 public:
+
     PGONode() {
-        // Initialize ISAM2 parameters
+
         gtsam::ISAM2Params params;
+        params.relinearizeThreshold = 0.1;
+        params.relinearizeSkip = 1;
         isam_ = gtsam::ISAM2(params);
 
-        // Define Diagonal Noise Models (6-axis Vector: Roll, Pitch, Yaw, X, Y, Z)
-        gtsam::Vector6 prior_sigmas, odom_sigmas;
-        prior_sigmas << 0.1, 0.1, 0.1, 0.1, 0.1, 0.1;
-        odom_sigmas  << 0.2, 0.2, 0.2, 0.2, 0.2, 0.2;
+        // ---------------------------
+        // CRITICAL: strong gauge fixing
+        // ---------------------------
+        gtsam::Vector6 prior_sigmas;
+        prior_sigmas << 1e-6, 1e-6, 1e-6, 1e-6, 1e-6, 1e-6;
+
+        gtsam::Vector6 odom_sigmas;
+        odom_sigmas << 0.05, 0.05, 0.05, 0.1, 0.1, 0.1;
 
         prior_noise_ = gtsam::noiseModel::Diagonal::Sigmas(prior_sigmas);
         odom_noise_  = gtsam::noiseModel::Diagonal::Sigmas(odom_sigmas);
 
-        // ROS Subscribers
-        odom_sub_ = nh_.subscribe("/relative_pose", 10, &PGONode::odomCallback, this);
-        loop_sub_ = nh_.subscribe("/loop_closure_constraint", 10, &PGONode::loopCallback, this);
+        sub_ = nh_.subscribe(
+            "/relative_pose",
+            100,
+            &PGONode::callback,
+            this
+        );
 
-        ROS_INFO("Pose Graph Optimization Node Initialized (C++).");
+        ROS_INFO("PGO node initialized (stable version).");
     }
 
-    // Convert ROS PoseStamped to GTSAM Pose3
-    gtsam::Pose3 poseToGtsam(const geometry_msgs::PoseStamped::ConstPtr& msg) {
-        const auto& p = msg->pose.position;
-        const auto& q = msg->pose.orientation;
-        
+    gtsam::Pose3 toPose(const geometry_msgs::Pose& p) {
+
         return gtsam::Pose3(
-            gtsam::Rot3::Quaternion(q.w, q.x, q.y, q.z),
-            gtsam::Point3(p.x, p.y, p.z)
+            gtsam::Rot3::Quaternion(
+                p.orientation.w,
+                p.orientation.x,
+                p.orientation.y,
+                p.orientation.z
+            ),
+            gtsam::Point3(
+                p.position.x,
+                p.position.y,
+                p.position.z
+            )
         );
     }
 
-    // Odometry Callback
-    void odomCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
-        gtsam::Pose3 curr_pose = poseToGtsam(msg);
-        size_t i = pose_count_;
-        pose_count_++;
+    void callback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
 
-        initial_values_.insert(i, curr_pose);
+        ROS_INFO("PGO callback triggered");
 
-        if (i == 0) {
-            // Anchor the first node to world origin space
-            graph_.add(gtsam::PriorFactor<gtsam::Pose3>(i, curr_pose, prior_noise_));
-            prev_pose_ = curr_pose;
+        gtsam::Pose3 rel = toPose(msg->pose);
+
+        size_t i = k_;
+        size_t j = k_ + 1;
+
+        // ---------------------------
+        // FIRST POSE: FIX WORLD FRAME
+        // ---------------------------
+        if (!initialized_) {
+
+            graph_.add(
+                gtsam::PriorFactor<gtsam::Pose3>(
+                    0,
+                    gtsam::Pose3(),
+                    prior_noise_
+                )
+            );
+
+            initial_.insert(0, gtsam::Pose3());
+            prev_pose_ = gtsam::Pose3();
+
+            initialized_ = true;
+            k_ = 1;
+
             return;
         }
 
-        // Relative transform i-1 -> i
-        gtsam::Pose3 rel = prev_pose_.between(curr_pose);
-        graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(i - 1, i, rel, odom_noise_));
-
-        prev_pose_ = curr_pose;
-        optimize();
-    }
-
-    // Loop Closure Callback
-    void loopCallback(const std_msgs::Float64MultiArray::ConstPtr& msg) {
-        if (msg->data.size() != 13) {
-            ROS_WARN("Invalid loop closure message array size. Expected 13.");
-            return;
+        // ---------------------------
+        // ensure safe initial guess
+        // ---------------------------
+        if (!initial_.exists(i)) {
+            initial_.insert(i, prev_pose_);
         }
 
-        size_t i = static_cast<size_t>(msg->data[0]);
-        size_t j = static_cast<size_t>(msg->data[1]);
-        
-        double dx = msg->data[2];
-        double dy = msg->data[3];
-        double dz = msg->data[4];
-        
-        double qx = msg->data[5];
-        double qy = msg->data[6];
-        double qz = msg->data[7];
-        double qw = msg->data[8];
+        gtsam::Pose3 predicted = prev_pose_.compose(rel);
 
-        gtsam::Pose3 rel(
-            gtsam::Rot3::Quaternion(qw, qx, qy, qz),
-            gtsam::Point3(dx, dy, dz)
+        if (!initial_.exists(j)) {
+            initial_.insert(j, predicted);
+        }
+
+        // ---------------------------
+        // add odometry factor
+        // ---------------------------
+        graph_.add(
+            gtsam::BetweenFactor<gtsam::Pose3>(
+                i, j, rel, odom_noise_
+            )
         );
 
-        graph_.add(gtsam::BetweenFactor<gtsam::Pose3>(i, j, rel, odom_noise_));
-        optimize();
+        prev_pose_ = predicted;
+        k_++;
+
+        optimize(j);
     }
 
-    // Execute ISAM2 pass
-    void optimize() {
-        isam_.update(graph_, initial_values_);
-        
-        // Clear incremental structures
+    void optimize(size_t latest) {
+
+        isam_.update(graph_, initial_);
+
         graph_.resize(0);
-        initial_values_.clear();
+        initial_.clear();
 
-        latest_estimate_ = isam_.calculateEstimate();
-        publishTF(latest_estimate_);
-    }
+        result_ = isam_.calculateEstimate();
 
-    // TF Broadcaster
-    void publishTF(const gtsam::Values& result) {
-        if (pose_count_ == 0) return;
+        if (result_.empty() || !result_.exists(latest)) {
+            ROS_WARN("PGO: missing estimate");
+            return;
+        }
 
-        size_t i = pose_count_ - 1;
-        if (!result.exists(i)) return;
+        gtsam::Pose3 p = result_.at<gtsam::Pose3>(latest);
 
-        gtsam::Pose3 pose = result.at<gtsam::Pose3>(i);
-        gtsam::Point3 t = pose.translation();
-        gtsam::Quaternion q = pose.rotation().toQuaternion();
+        auto t = p.translation();
+        auto q = p.rotation().toQuaternion();
 
-        geometry_msgs::TransformStamped tf_msg;
-        tf_msg.header.stamp = ros::Time::now();
-        tf_msg.header.frame_id = "map";
-        tf_msg.child_frame_id = "camera";
+        ROS_INFO_STREAM(
+            "PGO: "
+            << t.x() << ", "
+            << t.y() << ", "
+            << t.z()
+        );
 
-        tf_msg.transform.translation.x = t.x();
-        tf_msg.transform.translation.y = t.y();
-        tf_msg.transform.translation.z = t.z();
+        geometry_msgs::TransformStamped tf;
 
-        tf_msg.transform.rotation.x = q.x();
-        tf_msg.transform.rotation.y = q.y();
-        tf_msg.transform.rotation.z = q.z();
-        tf_msg.transform.rotation.w = q.w();
+        tf.header.stamp = ros::Time::now();
+        tf.header.frame_id = "map";
+        tf.child_frame_id = "camera";
 
-        br_.sendTransform(tf_msg);
+        tf.transform.translation.x = t.x();
+        tf.transform.translation.y = t.y();
+        tf.transform.translation.z = t.z();
+
+        tf.transform.rotation.x = q.x();
+        tf.transform.rotation.y = q.y();
+        tf.transform.rotation.z = q.z();
+        tf.transform.rotation.w = q.w();
+
+        br_.sendTransform(tf);
     }
 };
 
 int main(int argc, char** argv) {
+
     ros::init(argc, argv, "pgo_node");
     PGONode node;
     ros::spin();
-    return 0;
 }
